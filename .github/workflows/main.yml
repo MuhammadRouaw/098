@@ -1,0 +1,84 @@
+name: Android RDP Fast
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-android-rdp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Establish Tailscale Connection
+        run: |
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-android-$GITHUB_RUN_ID
+          
+          # Wait for Tailscale to assign an IP
+          TS_IP=""
+          RETRIES=0
+          while [ -z "$TS_IP" ] && [ $RETRIES -lt 10 ]; do
+              TS_IP=$(tailscale ip -4)
+              sleep 5
+              RETRIES=$((RETRIES+1))
+          done
+          
+          if [ -z "$TS_IP" ]; then
+              echo "Tailscale IP not assigned. Exiting."
+              exit 1
+          fi
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+
+      - name: Start Performance-Optimized Redroid
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-modules-extra-$(uname -r)
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
+          sudo modprobe ashmem_linux || true
+          
+          # Low Resolution + 30 FPS + Low DPI + Guest GPU Mode
+          docker run -d --privileged \
+            --name redroid \
+            -p 5555:5555 \
+            redroid/redroid:11.0.0-latest \
+            androidboot.redroid_width=540 \
+            androidboot.redroid_height=960 \
+            androidboot.redroid_dpi=200 \
+            androidboot.redroid_fps=30 \
+            androidboot.redroid_gpu_mode=guest
+
+      - name: Verify ADB & Disable Animations
+        run: |
+          sudo apt-get install -y android-tools-adb
+          echo "Waiting for Android container to boot..."
+          sleep 10
+          
+          # Connect local ADB
+          adb connect 127.0.0.1:5555
+          
+          # Disable Animations for Maximum UI Speed
+          adb shell settings put global window_animation_scale 0.0 || true
+          adb shell settings put global transition_animation_scale 0.0 || true
+          adb shell settings put global animator_duration_scale 0.0 || true
+          
+          echo "Android optimized successfully!"
+
+      - name: Maintain Connection
+        run: |
+          echo ""
+          echo "=== HIGH-SPEED ANDROID RDP INFO ==="
+          echo "Tailscale IP : $TAILSCALE_IP"
+          echo "ADB Port     : 5555"
+          echo "Connect CMD  : adb connect $TAILSCALE_IP:5555"
+          echo "Scrcpy CMD   : .\\scrcpy.exe --no-audio --max-fps=30 -m 800 -b 2M"
+          echo "===================================="
+          echo ""
+          
+          # Keep runner active
+          while true; do
+              echo "[$(date)] Android RDP Active"
+              sleep 300
+          done
