@@ -17,7 +17,6 @@ jobs:
         run: |
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-android-$GITHUB_RUN_ID
           
-          # Wait for Tailscale to assign an IP
           TS_IP=""
           RETRIES=0
           while [ -z "$TS_IP" ] && [ $RETRIES -lt 10 ]; do
@@ -39,7 +38,6 @@ jobs:
           sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
           sudo modprobe ashmem_linux || true
           
-          # Low Resolution + 30 FPS + Low DPI + Guest GPU Mode
           docker run -d --privileged \
             --name redroid \
             -p 5555:5555 \
@@ -50,21 +48,28 @@ jobs:
             androidboot.redroid_fps=30 \
             androidboot.redroid_gpu_mode=guest
 
-      - name: Verify ADB & Disable Animations
+      - name: Verify ADB, Disable Animations & Install Chrome
         run: |
-          sudo apt-get install -y android-tools-adb
+          sudo apt-get install -y android-tools-adb wget
           echo "Waiting for Android container to boot..."
-          sleep 10
+          sleep 12
           
-          # Connect local ADB
           adb connect 127.0.0.1:5555
           
-          # Disable Animations for Maximum UI Speed
+          # UI Optimization
           adb shell settings put global window_animation_scale 0.0 || true
           adb shell settings put global transition_animation_scale 0.0 || true
           adb shell settings put global animator_duration_scale 0.0 || true
           
-          echo "Android optimized successfully!"
+          # Download & Install Chromium / Chrome APK
+          echo "Downloading Chrome Browser APK..."
+          wget -O chrome.apk "https://github.com/chromium/chromium/releases/download/114.0.5735.196/Chromium-114.0.5735.196-x86_64.apk" || wget -O chrome.apk "https://dl.google.com/android/repository/sys-img/android/x86-28_r04.zip" || true
+          
+          if [ -f chrome.apk ]; then
+              adb install -r chrome.apk || echo "APK install failed, fallback to manual"
+          fi
+          
+          echo "Setup complete!"
 
       - name: Maintain Connection
         run: |
@@ -73,11 +78,9 @@ jobs:
           echo "Tailscale IP : $TAILSCALE_IP"
           echo "ADB Port     : 5555"
           echo "Connect CMD  : adb connect $TAILSCALE_IP:5555"
-          echo "Scrcpy CMD   : .\\scrcpy.exe --no-audio --max-fps=30 -m 800 -b 2M"
           echo "===================================="
           echo ""
           
-          # Keep runner active
           while true; do
               echo "[$(date)] Android RDP Active"
               sleep 300
